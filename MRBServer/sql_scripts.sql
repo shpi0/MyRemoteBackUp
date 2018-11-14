@@ -1,0 +1,10 @@
+CREATE SCHEMA `mrb` DEFAULT CHARACTER SET utf8 COLLATE utf8_bin ;
+
+CREATE TABLE `mrb`.`users` (
+  `id` INT(8) NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(20) NOT NULL,
+  `userpass` VARCHAR(44) NOT NULL,
+  `isbanned` TINYINT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `username_UNIQUE` (`username` ASC) VISIBLE);
+
