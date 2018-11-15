@@ -19,8 +19,6 @@ public class LoginController {
     @FXML
     VBox globParent;
 
-    public int id;
-
     public void auth(ActionEvent actionEvent) {
         Network.sendMsg(new MRBMessage(MessageType.LOGIN_ATTEMPT, new ArrayList<>(Arrays.asList(login.getText(), password.getText()))));
         globParent.getScene().getWindow().hide();

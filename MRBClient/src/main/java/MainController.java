@@ -1,8 +1,6 @@
 import files.FileMessageProcessor;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
-import javafx.event.Event;
-import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.fxml.Initializable;
@@ -12,7 +10,6 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ListView;
-import javafx.scene.input.MouseEvent;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import message.AbstractMessage;
@@ -31,6 +28,7 @@ public class MainController implements Initializable {
     private boolean loggedIn = false;
     private String selectedFile;
     private boolean localListSelected;
+    protected String newFileName;
 
     @FXML
     ListView<String> localListView;
@@ -56,6 +54,9 @@ public class MainController implements Initializable {
     @FXML
     Button registerBtn;
 
+    @FXML
+    Button renameBtn;
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         Network.start();
@@ -63,7 +64,6 @@ public class MainController implements Initializable {
             try {
                 while (true) {
                     AbstractMessage msg = Network.readObject();
-                    System.out.println(msg.getClass());
                     if (msg instanceof FileMessage) {
                         FileMessageProcessor.getInstance().fileMessageProcess((FileMessage) msg);
                         refreshLocalFileList();
@@ -71,12 +71,10 @@ public class MainController implements Initializable {
                     if (msg instanceof MRBMessage) {
                         switch (((MRBMessage) msg).getMessageType()) {
                             case LOGIN_FAILED:
-                                System.out.println("Got login fail error");
                                 showAlert("Login failed!");
                                 break;
                             case LOGIN_SUCCESS:
                                 loggedIn = true;
-                                System.out.println("Got login ok message");
                                 showAlert("Login ok!");
                                 Network.sendMsg(new MRBMessage(MessageType.FILE_LIST_REQUEST));
                                 loginBtn.setDisable(true);
@@ -84,15 +82,13 @@ public class MainController implements Initializable {
                                 refreshBtn.setDisable(false);
                                 break;
                             case REGISTER_DONE:
-                                System.out.println("Got reg done msg");
                                 showAlert("Registration done! You may login now.");
                                 break;
                             case REGISTER_FAIL:
-                                System.out.println("Got reg fail error");
                                 showAlert("Registration failed!");
                                 break;
                             case FILE_LIST:
-                                refreshServerFileList((ArrayList<String>)((MRBMessage) msg).getData());
+                                refreshServerFileList((ArrayList<String>) ((MRBMessage) msg).getData());
                                 break;
                             case FILE_DELETE_OK:
                                 refreshButton(new ActionEvent());
@@ -100,11 +96,16 @@ public class MainController implements Initializable {
                             case FILE_RECEIVED_SUCCESS:
                                 refreshButton(new ActionEvent());
                                 break;
+                            case FILE_RENAME_SUCCESS:
+                                refreshButton(new ActionEvent());
+                                break;
+                            case FILE_RENAME_FAIL:
+                                showAlert("File renaming failed!");
+                                break;
                         }
                     }
                 }
-            }
-            catch (ClassNotFoundException | IOException e) {
+            } catch (ClassNotFoundException | IOException e) {
                 e.printStackTrace();
             }
         });
@@ -117,13 +118,13 @@ public class MainController implements Initializable {
         deleteBtn.setDisable(true);
         sendBtn.setDisable(true);
         getBtn.setDisable(true);
+        renameBtn.setDisable(true);
     }
 
     public void initializeLocalListView() {
         refreshLocalFileList();
         localListView.setOnMouseClicked(event -> {
             getBtn.setDisable(true);
-            System.out.println("Click: " + localListView.getSelectionModel().getSelectedItem());
             selectedFile = localListView.getSelectionModel().getSelectedItem();
             if (!Paths.get("data/" + selectedFile).toFile().isDirectory()) {
                 sendBtn.setDisable(false);
@@ -131,6 +132,7 @@ public class MainController implements Initializable {
                 sendBtn.setDisable(true);
             }
             localListSelected = true;
+            renameBtn.setDisable(false);
             deleteBtn.setDisable(false);
         });
     }
@@ -141,6 +143,7 @@ public class MainController implements Initializable {
             getBtn.setDisable(false);
             selectedFile = serverListView.getSelectionModel().getSelectedItem();
             localListSelected = false;
+            renameBtn.setDisable(false);
             deleteBtn.setDisable(false);
         });
     }
@@ -157,11 +160,6 @@ public class MainController implements Initializable {
     }
 
     private void refreshServerFileList(List<String> fileList) {
-        System.out.println("refreshserverfilelist");
-        for (String s :fileList) {
-            System.out.println(s);
-        }
-
         if (loggedIn) {
             runFX(() -> {
                 serverListView.getItems().clear();
@@ -180,13 +178,7 @@ public class MainController implements Initializable {
 
     public void showAlert(String text) {
         // Показывает Alert с возможностью нажатия одной из двух кнопок
-        runFX(() -> {
-            Alert alert = new Alert(Alert.AlertType.WARNING, text, ButtonType.OK);
-            Optional<ButtonType> result = alert.showAndWait();
-            if (result.get().getText().equals("OK")) {
-                System.out.println("You clicked OK");
-            }
-        });
+        runFX(() -> new Alert(Alert.AlertType.WARNING, text, ButtonType.OK).showAndWait());
     }
 
     public void sendButton(ActionEvent actionEvent) {
@@ -223,6 +215,40 @@ public class MainController implements Initializable {
         }
     }
 
+    public void renameButton(ActionEvent actionEvent) {
+        newFileName = null;
+        if (loggedIn) {
+            try {
+                Stage stage = new Stage();
+                FXMLLoader loader = new FXMLLoader(getClass().getResource("/Rename.fxml"));
+                Parent root = loader.load();
+                RenameController lc = (RenameController) loader.getController();
+                lc.main = this;
+                lc.fileName.setText(selectedFile);
+                stage.setTitle("Rename file");
+                stage.setScene(new Scene(root, 400, 200));
+                stage.initModality(Modality.APPLICATION_MODAL);
+                stage.showAndWait();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            if (newFileName == null || "".equals(newFileName)) {
+                return;
+            }
+            if (localListSelected) {
+                try {
+                    Files.move(Paths.get("data/" + selectedFile), Paths.get("data/" + newFileName));
+                } catch (IOException e) {
+                    showAlert("File renaming failed!");
+                    e.printStackTrace();
+                }
+                refreshLocalFileList();
+            } else {
+                Network.sendMsg(new MRBMessage(MessageType.FILE_RENAME, new ArrayList<String>(Arrays.asList(selectedFile, newFileName))));
+            }
+        }
+    }
+
     public void registerButton(ActionEvent actionEvent) {
         if (!loggedIn) {
             try {
@@ -230,7 +256,6 @@ public class MainController implements Initializable {
                 FXMLLoader loader = new FXMLLoader(getClass().getResource("/Register.fxml"));
                 Parent root = loader.load();
                 RegisterController lc = (RegisterController) loader.getController();
-                lc.id = 100;
                 stage.setTitle("Registration");
                 stage.setScene(new Scene(root, 400, 200));
                 stage.initModality(Modality.APPLICATION_MODAL);
@@ -247,7 +272,6 @@ public class MainController implements Initializable {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/Login.fxml"));
             Parent root = loader.load();
             LoginController lc = (LoginController) loader.getController();
-            lc.id = 100;
             stage.setTitle("Authorization");
             stage.setScene(new Scene(root, 400, 200));
             stage.initModality(Modality.APPLICATION_MODAL);

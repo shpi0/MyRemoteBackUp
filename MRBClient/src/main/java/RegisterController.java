@@ -29,8 +29,6 @@ public class RegisterController implements Initializable {
     @FXML
     Button regBtn;
 
-    public int id;
-
     private Runnable r = new Runnable() {
         @Override
         public void run() {

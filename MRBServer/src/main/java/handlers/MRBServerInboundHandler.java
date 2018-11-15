@@ -11,6 +11,7 @@ import models.User;
 import services.UserService;
 import util.PassUtil;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -33,27 +34,33 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
         try {
             if (msg == null)
                 return;
-            System.out.println(msg.getClass());
             if (msg instanceof MRBMessage) {
                 switch (((MRBMessage) msg).getMessageType()) {
+                    case FILE_RENAME:
+                        String oldFileName = (String)(((MRBMessage) msg).getData()).get(0);
+                        String newFileName = (String)(((MRBMessage) msg).getData()).get(1);
+                        try {
+                            Files.move(Paths.get("data/" + userName + "/" + oldFileName), Paths.get("data/" + userName + "/" + newFileName));
+                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RENAME_SUCCESS));
+                        } catch (IOException e) {
+                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RENAME_FAIL));
+                            e.printStackTrace();
+                        }
+                        break;
                     case FILE_REQUEST:
                         if (userLoggedIn) {
                             ctx.writeAndFlush(FileMessageProcessor.getInstance().generateFileMessage(Paths.get("data/" + userName + "/" + ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0))));
                         }
                         break;
                     case REGISTER_REQUEST:
-                        System.out.println("reg try");
                         String receivedName = (String)(((MRBMessage) msg).getData()).get(0);
                         String receivedPass = (String)(((MRBMessage) msg).getData()).get(1);
                         String receivedPass2 = (String)(((MRBMessage) msg).getData()).get(2);
                         System.out.println(receivedName + " " + receivedPass + " " + receivedPass2);
                         MessageType messageType = MessageType.REGISTER_FAIL;
                         if (receivedName != null && receivedPass != null && receivedPass2 != null) {
-                            System.out.println("1");
                             if (userService.findByName(receivedName) == null) {
-                                System.out.println("2");
                                 if (receivedPass.equals(receivedPass2)) {
-                                    System.out.println("3");
                                     userService.register(new User(receivedName, PassUtil.getInstance().getPassHash(receivedPass)));
                                     messageType = MessageType.REGISTER_DONE;
                                 }
@@ -68,14 +75,11 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                         }
                         break;
                     case LOGIN_ATTEMPT:
-                        System.out.println("auth try");
                         if (userService.authUser(((ArrayList<String>) (((MRBMessage) msg).getData())).get(0), PassUtil.getInstance().getPassHash(((ArrayList<String>) (((MRBMessage) msg).getData())).get(1)))) {
-                            System.out.println("Auth user ok");
                             userLoggedIn = true;
                             userName = ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0);
                             ctx.writeAndFlush(new MRBMessage(MessageType.LOGIN_SUCCESS));
                         } else {
-                            System.out.println("auth fail");
                             ctx.writeAndFlush(new MRBMessage(MessageType.LOGIN_FAILED));
                         }
                         break;
