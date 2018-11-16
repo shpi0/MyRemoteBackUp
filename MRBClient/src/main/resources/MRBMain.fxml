@@ -22,6 +22,7 @@
                         <Button fx:id="refreshBtn" onAction="#refreshButton" mnemonicParsing="false" prefWidth="100.0" text="REFRESH" />
                         <Button fx:id="deleteBtn" onAction="#deleteButton" mnemonicParsing="false" prefWidth="100.0" text="DELETE" />
                         <Button fx:id="renameBtn" onAction="#renameButton" mnemonicParsing="false" prefWidth="100.0" text="RENAME" />
+                        <Button fx:id="newFolderBtn" onAction="#newFolderButton" mnemonicParsing="false" prefWidth="100.0" text="NEW FOLDER" />
                         <Button fx:id="sendBtn" onAction="#sendButton" mnemonicParsing="false" prefWidth="100.0" text="SEND &gt;&gt;&gt;" />
                         <Button fx:id="getBtn" onAction="#getButton" mnemonicParsing="false" prefWidth="100.0" text="&lt;&lt;&lt; GET" />
                      </children>

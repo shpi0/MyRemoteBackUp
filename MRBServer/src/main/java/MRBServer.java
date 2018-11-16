@@ -1,5 +1,4 @@
 import handlers.MRBServerInboundHandler;
-import handlers.MRBServerOutboundHandler;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
@@ -30,8 +29,7 @@ public class MRBServer {
                             socketChannel.pipeline().addLast(
                                     new ObjectDecoder(MAX_OBJ_SIZE, ClassResolvers.cacheDisabled(null)),
                                     new ObjectEncoder(),
-                                    new MRBServerInboundHandler(),
-                                    new MRBServerOutboundHandler()
+                                    new MRBServerInboundHandler()
                             );
                         }
                     })
