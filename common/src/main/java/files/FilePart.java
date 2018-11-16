@@ -2,6 +2,10 @@ package files;
 
 import lombok.Data;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 @Data
 public class FilePart {
 
@@ -25,4 +29,14 @@ public class FilePart {
         this.totalParts = totalParts;
         this.currentPartNum = currentPartNum;
     }
+
+    public FilePart(Path path, String filePath) throws IOException {
+        this.firstBytePos = 0;
+        this.fileData = Files.readAllBytes(path);
+        this.fileName = path.getFileName().toString();
+        this.filePath = filePath;
+        this.totalParts = 1;
+        this.currentPartNum = 1;
+    }
+
 }

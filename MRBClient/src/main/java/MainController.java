@@ -27,6 +27,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.LinkedBlockingDeque;
 
 public class MainController implements Initializable {
 
@@ -41,8 +44,36 @@ public class MainController implements Initializable {
     private Map<String, FileType> localFilesMap = new HashMap<>();
     private Map<String, FileType> serverFilesMap = new HashMap<>();
     private LinkedList<String> folders = new LinkedList<>();
-    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
+//    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
+    private BlockingDeque<FilePart> filePartsToSend = new LinkedBlockingDeque<>();
     private String serverPath;
+
+    private class Consumer implements Runnable {
+        @Override
+        public void run() {
+            FilePart fp;
+            while (true) {
+                if (!loggedIn) {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    continue;
+                }
+                fp = filePartsToSend.poll();
+                if (fp != null) {
+                    Network.sendMsg(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
+                } else {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
 
     @FXML
     ListView<String> localListView;
@@ -119,12 +150,7 @@ public class MainController implements Initializable {
                                 refreshButton(new ActionEvent());
                                 break;
                             case FILE_PART_RECEIVED_SUCCESS:
-                                FilePart filePart = filePartsToSend.poll();
-                                if (filePart != null) {
-                                    Network.sendMsg(new FileMessage(filePart.getFileName(), filePart.getFilePath(), filePart.getFileData(), filePart.getTotalParts(), filePart.getCurrentPartNum()));
-                                } else {
-                                    refreshButton(new ActionEvent());
-                                }
+                                refreshButton(new ActionEvent());
                                 break;
                             case FILE_RENAME_SUCCESS:
                                 refreshButton(new ActionEvent());
@@ -147,6 +173,10 @@ public class MainController implements Initializable {
         });
         t.setDaemon(true);
         t.start();
+        Consumer consumer = new Consumer();
+        Thread consumerThread = new Thread(consumer);
+        consumerThread.setDaemon(true);
+        consumerThread.start();
         initializeLocalListView();
         initializeServerListView();
         loginBtn.setDisable(false);
@@ -295,12 +325,8 @@ public class MainController implements Initializable {
                         System.out.println();
                     }
                     raf.close();
-                    FilePart filePart = filePartsToSend.poll();
-                    if (filePart != null) {
-                        Network.sendMsg(new FileMessage(filePart.getFileName(), filePart.getFilePath(), filePart.getFileData(), filePart.getTotalParts(), filePart.getCurrentPartNum()));
-                    }
                 } else {
-                    Network.sendMsg(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(ROOT_FOLDER + "/" + selectedFile)));
+                    filePartsToSend.offer(new FilePart(Paths.get(buildPathToCurrentFolder() + selectedFile), serverPath));
                 }
             } catch (IOException e) {
                 e.printStackTrace();
