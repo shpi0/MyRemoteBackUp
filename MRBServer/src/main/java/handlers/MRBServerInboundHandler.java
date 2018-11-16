@@ -13,6 +13,7 @@ import services.UserService;
 import util.PassUtil;
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -21,6 +22,7 @@ import java.util.*;
 public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
 
     private static final String ROOT_FOLDER = "data";
+    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 64;
 
     private UserService userService = new UserService();
     private boolean userLoggedIn;
@@ -145,7 +147,7 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                                         filesMap.put(o, FileType.FILE);
                                         filesList.add(o);
                                     });
-                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_LIST, filesList, filesMap));
+                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_LIST, filesList, filesMap, buildCurrentPath()));
                         }
                         break;
                 }
@@ -153,8 +155,17 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                 if (msg instanceof FileMessage) {
                     if (userLoggedIn) {
                         try {
-                            Files.write(Paths.get(buildCurrentPath() + ((FileMessage) msg).getFileName()), ((FileMessage) msg).getFileData(), StandardOpenOption.CREATE);
-                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_SUCCESS));
+                            if (((FileMessage) msg).isDivided()) {
+                                RandomAccessFile raf = new RandomAccessFile(((FileMessage) msg).getFolder() + ((FileMessage) msg).getFileName(), "rw");
+                                raf.seek((((FileMessage) msg).getPartNum() - 1) * MAX_FILE_PART_SIZE);
+                                raf.write(((FileMessage) msg).getFileData());
+                                raf.close();
+                                System.out.println("Write file part " + ((FileMessage) msg).getPartNum());
+                                ctx.writeAndFlush(new MRBMessage(MessageType.FILE_PART_RECEIVED_SUCCESS));
+                            } else {
+                                Files.write(Paths.get(buildCurrentPath() + ((FileMessage) msg).getFileName()), ((FileMessage) msg).getFileData(), StandardOpenOption.CREATE);
+                                ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_SUCCESS));
+                            }
                         } catch (IOException e) {
                             ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_FAIL));
                             e.printStackTrace();

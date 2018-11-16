@@ -1,4 +1,5 @@
 import files.FileMessageProcessor;
+import files.FilePart;
 import files.FileType;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
@@ -19,15 +20,19 @@ import message.MRBMessage;
 import message.MessageType;
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.net.URL;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 
 public class MainController implements Initializable {
 
     private final static String ROOT_FOLDER = "data";
     private final static String PARENT_FOLDER_LINK = "[..]";
+    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 64;
 
     private boolean loggedIn = false;
     private String selectedFile;
@@ -36,6 +41,8 @@ public class MainController implements Initializable {
     private Map<String, FileType> localFilesMap = new HashMap<>();
     private Map<String, FileType> serverFilesMap = new HashMap<>();
     private LinkedList<String> folders = new LinkedList<>();
+    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
+    private String serverPath;
 
     @FXML
     ListView<String> localListView;
@@ -75,7 +82,11 @@ public class MainController implements Initializable {
                 while (true) {
                     AbstractMessage msg = Network.readObject();
                     if (msg instanceof FileMessage) {
-                        FileMessageProcessor.getInstance().fileMessageProcess((FileMessage) msg);
+                        try {
+                            Files.write(Paths.get(buildPathToCurrentFolder() + ((FileMessage) msg).getFileName()), ((FileMessage) msg).getFileData(), StandardOpenOption.CREATE);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                         refreshLocalFileList();
                     }
                     if (msg instanceof MRBMessage) {
@@ -99,12 +110,21 @@ public class MainController implements Initializable {
                                 break;
                             case FILE_LIST:
                                 refreshServerFileList((Map<String, FileType>) ((MRBMessage) msg).getFilesData(), (List<String>) ((MRBMessage) msg).getData());
+                                serverPath = ((MRBMessage) msg).getCurrentFolder();
                                 break;
                             case FILE_DELETE_OK:
                                 refreshButton(new ActionEvent());
                                 break;
                             case FILE_RECEIVED_SUCCESS:
                                 refreshButton(new ActionEvent());
+                                break;
+                            case FILE_PART_RECEIVED_SUCCESS:
+                                FilePart filePart = filePartsToSend.poll();
+                                if (filePart != null) {
+                                    Network.sendMsg(new FileMessage(filePart.getFileName(), filePart.getFilePath(), filePart.getFileData(), filePart.getTotalParts(), filePart.getCurrentPartNum()));
+                                } else {
+                                    refreshButton(new ActionEvent());
+                                }
                                 break;
                             case FILE_RENAME_SUCCESS:
                                 refreshButton(new ActionEvent());
@@ -247,7 +267,44 @@ public class MainController implements Initializable {
 
     public void sendButton(ActionEvent actionEvent) {
         if (loggedIn) {
-            Network.sendMsg(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(ROOT_FOLDER + "/" + selectedFile)));
+            try {
+                Path fileToSend = Paths.get(ROOT_FOLDER + "/" + selectedFile);
+                if (Files.size(fileToSend) > MAX_FILE_PART_SIZE) {
+                    int partsCount = (int) (Files.size(fileToSend) / MAX_FILE_PART_SIZE);
+                    System.out.println("Parts count: " + partsCount);
+                    int lastPartSize = (int) (Files.size(fileToSend) % MAX_FILE_PART_SIZE);
+                    if (lastPartSize > 0) {
+                        partsCount++;
+                    }
+                    System.out.println("Last part size: " + lastPartSize);
+                    RandomAccessFile raf = new RandomAccessFile(fileToSend.toFile(), "r");
+                    byte[] data = new byte[MAX_FILE_PART_SIZE];
+                    for (int i = 0; i < partsCount; i++) {
+                        raf.seek(i * MAX_FILE_PART_SIZE);
+                        if (lastPartSize > 0 && i == partsCount - 1) {
+                            data = new byte[lastPartSize];
+                            raf.read(data, 0, lastPartSize);
+                        } else {
+                            raf.read(data, 0, MAX_FILE_PART_SIZE);
+                        }
+                        filePartsToSend.offer(new FilePart(i * MAX_FILE_PART_SIZE, data, selectedFile, serverPath, partsCount, i + 1));
+                        System.out.print("From byte: " + i * MAX_FILE_PART_SIZE + " data: ");
+                        for (int j = 0; j < data.length; j++) {
+                            System.out.print(data[j] + " ");
+                        }
+                        System.out.println();
+                    }
+                    raf.close();
+                    FilePart filePart = filePartsToSend.poll();
+                    if (filePart != null) {
+                        Network.sendMsg(new FileMessage(filePart.getFileName(), filePart.getFilePath(), filePart.getFileData(), filePart.getTotalParts(), filePart.getCurrentPartNum()));
+                    }
+                } else {
+                    Network.sendMsg(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(ROOT_FOLDER + "/" + selectedFile)));
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 

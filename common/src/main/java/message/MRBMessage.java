@@ -16,6 +16,7 @@ public class MRBMessage extends AbstractMessage implements Serializable {
     private MessageType messageType;
     private List<?> data;
     private Map<?, ?> filesData;
+    private String currentFolder;
 
     public MRBMessage(MessageType messageType) {
         this.messageType = messageType;
@@ -27,9 +28,10 @@ public class MRBMessage extends AbstractMessage implements Serializable {
         this.data = data;
     }
 
-    public MRBMessage(MessageType messageType, List<?> data, Map<?, ?> filesData) {
+    public MRBMessage(MessageType messageType, List<?> data, Map<?, ?> filesData, String currentFolder) {
         this.messageType = messageType;
         this.data = data;
         this.filesData = filesData;
+        this.currentFolder = currentFolder;
     }
 }
