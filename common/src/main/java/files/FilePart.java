@@ -13,19 +13,25 @@ public class FilePart {
 
     private byte[] fileData;
 
+    private int partSize;
+
     private String fileName;
 
     private String filePath;
+
+    private String localFilePath;
 
     private int totalParts;
 
     private int currentPartNum;
 
-    public FilePart(long firstBytePos, byte[] fileData, String fileName, String filePath, int totalParts, int currentPartNum) {
+    public FilePart(long firstBytePos, byte[] fileData, String fileName, String filePath, String localFilePath, int partSize, int totalParts, int currentPartNum) {
         this.firstBytePos = firstBytePos;
         this.fileData = fileData;
         this.fileName = fileName;
         this.filePath = filePath;
+        this.localFilePath = localFilePath;
+        this.partSize = partSize;
         this.totalParts = totalParts;
         this.currentPartNum = currentPartNum;
     }

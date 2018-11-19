@@ -10,14 +10,10 @@ public class Network {
     private static ObjectEncoderOutputStream out;
     private static ObjectDecoderInputStream in;
 
-    public static void start() {
-        try {
-            socket = new Socket("localhost", 8189);
-            out = new ObjectEncoderOutputStream(socket.getOutputStream());
-            in = new ObjectDecoderInputStream(socket.getInputStream());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    public static void start() throws IOException {
+        socket = new Socket("localhost", 8189);
+        out = new ObjectEncoderOutputStream(socket.getOutputStream());
+        in = new ObjectDecoderInputStream(socket.getInputStream(), 1024 * 1024 * 100);
     }
 
     public static void stop() {
@@ -40,7 +36,9 @@ public class Network {
 
     public static boolean sendMsg(AbstractMessage msg) {
         try {
-            out.writeObject(msg);
+            synchronized (out) {
+                out.writeObject(msg);
+            }
             return true;
         } catch (IOException e) {
             e.printStackTrace();
@@ -49,7 +47,9 @@ public class Network {
     }
 
     public static AbstractMessage readObject() throws ClassNotFoundException, IOException {
-        Object obj = in.readObject();
-        return (AbstractMessage) obj;
+        synchronized (in) {
+            Object obj = in.readObject();
+            return (AbstractMessage) obj;
+        }
     }
 }

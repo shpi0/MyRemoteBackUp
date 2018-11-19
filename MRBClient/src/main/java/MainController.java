@@ -20,14 +20,11 @@ import message.MRBMessage;
 import message.MessageType;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.LinkedBlockingDeque;
 
@@ -35,16 +32,19 @@ public class MainController implements Initializable {
 
     private final static String ROOT_FOLDER = "data";
     private final static String PARENT_FOLDER_LINK = "[..]";
-    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 64;
+    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 32;
+
+    private FileMessageProcessor fileMessageProcessor = new FileMessageProcessor();
 
     private boolean loggedIn = false;
+    private boolean connected = false;
     private String selectedFile;
     private boolean localListSelected;
     protected String newFileName;
     private Map<String, FileType> localFilesMap = new HashMap<>();
     private Map<String, FileType> serverFilesMap = new HashMap<>();
     private LinkedList<String> folders = new LinkedList<>();
-//    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
+    //    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
     private BlockingDeque<FilePart> filePartsToSend = new LinkedBlockingDeque<>();
     private String serverPath;
 
@@ -52,6 +52,7 @@ public class MainController implements Initializable {
         @Override
         public void run() {
             FilePart fp;
+            byte[] data = new byte[MAX_FILE_PART_SIZE];
             while (true) {
                 if (!loggedIn) {
                     try {
@@ -63,7 +64,15 @@ public class MainController implements Initializable {
                 }
                 fp = filePartsToSend.poll();
                 if (fp != null) {
-                    Network.sendMsg(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
+                    try {
+                        fileMessageProcessor.addFileDataToFilePart(fp, MAX_FILE_PART_SIZE, data);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    if (fp.getFileData() != null) {
+                        System.out.println("Sending message part " + fp.getCurrentPartNum() + " of " + fp.getTotalParts() + ", filename: " + fp.getFileName());
+                        Network.sendMsg(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
+                    }
                 } else {
                     try {
                         Thread.sleep(1000);
@@ -107,63 +116,71 @@ public class MainController implements Initializable {
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        Network.start();
+        try {
+            Network.start();
+            connected = true;
+        } catch (IOException e) {
+            showAlert("Can't connect to the server! Try again later.");
+            e.printStackTrace();
+        }
         Thread t = new Thread(() -> {
             try {
                 while (true) {
-                    AbstractMessage msg = Network.readObject();
-                    if (msg instanceof FileMessage) {
-                        try {
-                            Files.write(Paths.get(buildPathToCurrentFolder() + ((FileMessage) msg).getFileName()), ((FileMessage) msg).getFileData(), StandardOpenOption.CREATE);
-                        } catch (IOException e) {
-                            e.printStackTrace();
+                    if (connected) {
+                        AbstractMessage msg = Network.readObject();
+                        if (msg instanceof FileMessage) {
+                            try {
+                                fileMessageProcessor.writeIncomingFileMessageToDisk((FileMessage) msg, buildPathToCurrentFolder(), MAX_FILE_PART_SIZE);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                            refreshLocalFileList();
                         }
-                        refreshLocalFileList();
-                    }
-                    if (msg instanceof MRBMessage) {
-                        switch (((MRBMessage) msg).getMessageType()) {
-                            case LOGIN_FAILED:
-                                showAlert("Login failed!");
-                                break;
-                            case LOGIN_SUCCESS:
-                                loggedIn = true;
-                                showAlert("Login ok!");
-                                Network.sendMsg(new MRBMessage(MessageType.FILE_LIST_REQUEST));
-                                loginBtn.setDisable(true);
-                                registerBtn.setDisable(true);
-                                refreshBtn.setDisable(false);
-                                break;
-                            case REGISTER_DONE:
-                                showAlert("Registration done! You may login now.");
-                                break;
-                            case REGISTER_FAIL:
-                                showAlert("Registration failed!");
-                                break;
-                            case FILE_LIST:
-                                refreshServerFileList((Map<String, FileType>) ((MRBMessage) msg).getFilesData(), (List<String>) ((MRBMessage) msg).getData());
-                                serverPath = ((MRBMessage) msg).getCurrentFolder();
-                                break;
-                            case FILE_DELETE_OK:
-                                refreshButton(new ActionEvent());
-                                break;
-                            case FILE_RECEIVED_SUCCESS:
-                                refreshButton(new ActionEvent());
-                                break;
-                            case FILE_PART_RECEIVED_SUCCESS:
-                                refreshButton(new ActionEvent());
-                                break;
-                            case FILE_RENAME_SUCCESS:
-                                refreshButton(new ActionEvent());
-                                break;
-                            case FILE_RENAME_FAIL:
-                                showAlert("File renaming on server failed!");
-                                break;
-                            case CREATE_FOLDER_FAIL:
-                                showAlert("Creating folder on server failed!");
-                                break;
-                            case CREATE_FOLDER_SUCCESS:
-                                refreshButton(new ActionEvent());
-                                break;
+                        if (msg instanceof MRBMessage) {
+                            switch (((MRBMessage) msg).getMessageType()) {
+                                case LOGIN_FAILED:
+                                    showAlert("Login failed!");
+                                    break;
+                                case LOGIN_SUCCESS:
+                                    loggedIn = true;
+                                    showAlert("Login ok!");
+                                    Network.sendMsg(new MRBMessage(MessageType.FILE_LIST_REQUEST));
+                                    loginBtn.setDisable(true);
+                                    registerBtn.setDisable(true);
+                                    refreshBtn.setDisable(false);
+                                    break;
+                                case REGISTER_DONE:
+                                    showAlert("Registration done! You may login now.");
+                                    break;
+                                case REGISTER_FAIL:
+                                    showAlert("Registration failed!");
+                                    break;
+                                case FILE_LIST:
+                                    refreshServerFileList((Map<String, FileType>) ((MRBMessage) msg).getFilesData(), (List<String>) ((MRBMessage) msg).getData());
+                                    serverPath = ((MRBMessage) msg).getCurrentFolder();
+                                    break;
+                                case FILE_DELETE_OK:
+                                    refreshButton(new ActionEvent());
+                                    break;
+                                case FILE_RECEIVED_SUCCESS:
+                                    refreshButton(new ActionEvent());
+                                    break;
+                                case FILE_PART_RECEIVED_SUCCESS:
+                                    refreshButton(new ActionEvent());
+                                    break;
+                                case FILE_RENAME_SUCCESS:
+                                    refreshButton(new ActionEvent());
+                                    break;
+                                case FILE_RENAME_FAIL:
+                                    showAlert("File renaming on server failed!");
+                                    break;
+                                case CREATE_FOLDER_FAIL:
+                                    showAlert("Creating folder on server failed!");
+                                    break;
+                                case CREATE_FOLDER_SUCCESS:
+                                    refreshButton(new ActionEvent());
+                                    break;
+                            }
                         }
                     }
                 }
@@ -191,7 +208,7 @@ public class MainController implements Initializable {
     private String buildPathToCurrentFolder() {
         StringBuilder sb = new StringBuilder();
         sb.append(ROOT_FOLDER).append("/");
-        for (String s :folders) {
+        for (String s : folders) {
             sb.append(s);
             sb.append("/");
         }
@@ -203,17 +220,17 @@ public class MainController implements Initializable {
         localListView.setOnMouseClicked(event -> {
             selectedFile = localListView.getSelectionModel().getSelectedItem();
             if (event.getClickCount() == 2) {
-                    if (localFilesMap.get(selectedFile).equals(FileType.FOLDER)) {
-                        if (selectedFile.equals(PARENT_FOLDER_LINK)) {
-                            folders.removeLast();
-                        } else {
-                            folders.add(selectedFile.substring(1, selectedFile.length() - 1));
-                        }
-                        refreshLocalFileList();
+                if (localFilesMap.get(selectedFile).equals(FileType.FOLDER)) {
+                    if (selectedFile.equals(PARENT_FOLDER_LINK)) {
+                        folders.removeLast();
+                    } else {
+                        folders.add(selectedFile.substring(1, selectedFile.length() - 1));
                     }
+                    refreshLocalFileList();
+                }
             }
             getBtn.setDisable(true);
-            if (!Paths.get(ROOT_FOLDER + "/" + selectedFile).toFile().isDirectory()) {
+            if (!Paths.get(buildPathToCurrentFolder() + selectedFile).toFile().isDirectory()) {
                 sendBtn.setDisable(false);
             } else {
                 sendBtn.setDisable(true);
@@ -222,6 +239,7 @@ public class MainController implements Initializable {
             renameBtn.setDisable(false);
             deleteBtn.setDisable(false);
             newFolderBtn.setDisable(false);
+            serverListView.getSelectionModel().clearSelection();
         });
     }
 
@@ -239,6 +257,7 @@ public class MainController implements Initializable {
             renameBtn.setDisable(false);
             deleteBtn.setDisable(false);
             newFolderBtn.setDisable(false);
+            localListView.getSelectionModel().clearSelection();
         });
     }
 
@@ -298,33 +317,23 @@ public class MainController implements Initializable {
     public void sendButton(ActionEvent actionEvent) {
         if (loggedIn) {
             try {
-                Path fileToSend = Paths.get(ROOT_FOLDER + "/" + selectedFile);
+                Path fileToSend = Paths.get(buildPathToCurrentFolder() + selectedFile);
                 if (Files.size(fileToSend) > MAX_FILE_PART_SIZE) {
                     int partsCount = (int) (Files.size(fileToSend) / MAX_FILE_PART_SIZE);
-                    System.out.println("Parts count: " + partsCount);
                     int lastPartSize = (int) (Files.size(fileToSend) % MAX_FILE_PART_SIZE);
                     if (lastPartSize > 0) {
                         partsCount++;
                     }
+                    System.out.println("Parts count: " + partsCount);
                     System.out.println("Last part size: " + lastPartSize);
-                    RandomAccessFile raf = new RandomAccessFile(fileToSend.toFile(), "r");
-                    byte[] data = new byte[MAX_FILE_PART_SIZE];
+                    int partSize = MAX_FILE_PART_SIZE;
                     for (int i = 0; i < partsCount; i++) {
-                        raf.seek(i * MAX_FILE_PART_SIZE);
                         if (lastPartSize > 0 && i == partsCount - 1) {
-                            data = new byte[lastPartSize];
-                            raf.read(data, 0, lastPartSize);
-                        } else {
-                            raf.read(data, 0, MAX_FILE_PART_SIZE);
+                            partSize = lastPartSize;
                         }
-                        filePartsToSend.offer(new FilePart(i * MAX_FILE_PART_SIZE, data, selectedFile, serverPath, partsCount, i + 1));
-                        System.out.print("From byte: " + i * MAX_FILE_PART_SIZE + " data: ");
-                        for (int j = 0; j < data.length; j++) {
-                            System.out.print(data[j] + " ");
-                        }
-                        System.out.println();
+                        System.out.println("Adding to send queue file part " + i + 1);
+                        filePartsToSend.offer(new FilePart(i * MAX_FILE_PART_SIZE, null, selectedFile, serverPath, buildPathToCurrentFolder(), partSize, partsCount, i + 1));
                     }
-                    raf.close();
                 } else {
                     filePartsToSend.offer(new FilePart(Paths.get(buildPathToCurrentFolder() + selectedFile), serverPath));
                 }
@@ -336,7 +345,7 @@ public class MainController implements Initializable {
 
     public void getButton(ActionEvent actionEvent) {
         if (loggedIn) {
-            Network.sendMsg(new MRBMessage(MessageType.FILE_REQUEST, new ArrayList<String>(Arrays.asList(selectedFile))));
+            Network.sendMsg(new MRBMessage(MessageType.FILE_REQUEST, new ArrayList<String>(Arrays.asList(selectedFile, buildPathToCurrentFolder()))));
         }
     }
 
@@ -344,7 +353,7 @@ public class MainController implements Initializable {
         if (loggedIn) {
             if (localListSelected) {
                 try {
-                    Files.deleteIfExists(Paths.get(ROOT_FOLDER + "/" + selectedFile));
+                    Files.deleteIfExists(Paths.get(buildPathToCurrentFolder() + selectedFile));
                     refreshLocalFileList();
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -417,7 +426,7 @@ public class MainController implements Initializable {
             }
             if (localListSelected) {
                 try {
-                    Files.move(Paths.get(ROOT_FOLDER + "/" + selectedFile), Paths.get(ROOT_FOLDER + "/" + newFileName));
+                    Files.move(Paths.get(buildPathToCurrentFolder() + selectedFile), Paths.get(buildPathToCurrentFolder() + newFileName));
                 } catch (IOException e) {
                     showAlert("File renaming failed!");
                     e.printStackTrace();

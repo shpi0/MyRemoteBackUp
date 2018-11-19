@@ -1,6 +1,7 @@
 package handlers;
 
 import files.FileMessageProcessor;
+import files.FilePart;
 import files.FileType;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -13,26 +14,33 @@ import services.UserService;
 import util.PassUtil;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.LinkedBlockingDeque;
 
 public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
 
     private static final String ROOT_FOLDER = "data";
-    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 64;
+    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 32;
+
+    private FileMessageProcessor fileMessageProcessor = new FileMessageProcessor();
+    private byte[] data = new byte[MAX_FILE_PART_SIZE];
+    private FilePart fp;
 
     private UserService userService = new UserService();
     private boolean userLoggedIn;
     private String userName;
     private LinkedList<String> folders = new LinkedList<>();
 
+    private BlockingDeque<FilePart> filePartsToSend = new LinkedBlockingDeque<>();
+
     private String buildCurrentPath() {
         StringBuilder sb = new StringBuilder();
         sb.append(ROOT_FOLDER).append("/").append(userName).append("/");
-        for (String s :folders) {
+        for (String s : folders) {
             sb.append(s).append("/");
         }
         return sb.toString();
@@ -77,13 +85,47 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                         break;
                     case FILE_REQUEST:
                         if (userLoggedIn) {
-                            ctx.writeAndFlush(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(buildCurrentPath() + ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0))));
+                            String selectedFile = ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0);
+                            String serverPath = ((ArrayList<String>) (((MRBMessage) msg).getData())).get(1);
+                            try {
+                                Path fileToSend = Paths.get(buildCurrentPath() + selectedFile);
+                                if (Files.size(fileToSend) > MAX_FILE_PART_SIZE) {
+                                    int partsCount = (int) (Files.size(fileToSend) / MAX_FILE_PART_SIZE);
+                                    int lastPartSize = (int) (Files.size(fileToSend) % MAX_FILE_PART_SIZE);
+                                    if (lastPartSize > 0) {
+                                        partsCount++;
+                                    }
+                                    System.out.println("Parts count: " + partsCount);
+                                    System.out.println("Last part size: " + lastPartSize);
+                                    int partSize = MAX_FILE_PART_SIZE;
+                                    for (int i = 0; i < partsCount; i++) {
+                                        if (lastPartSize > 0 && i == partsCount - 1) {
+                                            partSize = lastPartSize;
+                                        }
+                                        filePartsToSend.offer(new FilePart(i * MAX_FILE_PART_SIZE, null, selectedFile, serverPath, buildCurrentPath(), partSize, partsCount, i + 1));
+                                    }
+                                } else {
+                                    filePartsToSend.offer(new FilePart(Paths.get(buildCurrentPath() + selectedFile), serverPath));
+                                }
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                            fp = filePartsToSend.poll();
+                            while (fp != null) {
+                                fileMessageProcessor.addFileDataToFilePart(fp, MAX_FILE_PART_SIZE, data);
+                                if (fp.getFileData() != null) {
+                                    System.out.println("Sending message part " + fp.getCurrentPartNum() + " of " + fp.getTotalParts() + ", filename: " + fp.getFileName());
+                                    ctx.writeAndFlush(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
+//                                    ctx.writeAndFlush(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(buildCurrentPath() + ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0))));
+                                }
+                                fp = filePartsToSend.poll();
+                            }
                         }
                         break;
                     case REGISTER_REQUEST:
-                        String receivedName = (String)(((MRBMessage) msg).getData()).get(0);
-                        String receivedPass = (String)(((MRBMessage) msg).getData()).get(1);
-                        String receivedPass2 = (String)(((MRBMessage) msg).getData()).get(2);
+                        String receivedName = (String) (((MRBMessage) msg).getData()).get(0);
+                        String receivedPass = (String) (((MRBMessage) msg).getData()).get(1);
+                        String receivedPass2 = (String) (((MRBMessage) msg).getData()).get(2);
                         MessageType messageType = MessageType.REGISTER_FAIL;
                         if (receivedName != null && receivedPass != null && receivedPass2 != null) {
                             if (userService.findByName(receivedName) == null) {
@@ -155,17 +197,8 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                 if (msg instanceof FileMessage) {
                     if (userLoggedIn) {
                         try {
-                            if (((FileMessage) msg).isDivided()) {
-                                RandomAccessFile raf = new RandomAccessFile(((FileMessage) msg).getFolder() + ((FileMessage) msg).getFileName(), "rw");
-                                raf.seek((((FileMessage) msg).getPartNum() - 1) * MAX_FILE_PART_SIZE);
-                                raf.write(((FileMessage) msg).getFileData());
-                                raf.close();
-                                System.out.println("Write file part " + ((FileMessage) msg).getPartNum());
-                                ctx.writeAndFlush(new MRBMessage(MessageType.FILE_PART_RECEIVED_SUCCESS));
-                            } else {
-                                Files.write(Paths.get(buildCurrentPath() + ((FileMessage) msg).getFileName()), ((FileMessage) msg).getFileData(), StandardOpenOption.CREATE);
-                                ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_SUCCESS));
-                            }
+                            fileMessageProcessor.writeIncomingFileMessageToDisk((FileMessage) msg, buildCurrentPath(), MAX_FILE_PART_SIZE);
+                            ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_SUCCESS));
                         } catch (IOException e) {
                             ctx.writeAndFlush(new MRBMessage(MessageType.FILE_RECEIVED_FAIL));
                             e.printStackTrace();
