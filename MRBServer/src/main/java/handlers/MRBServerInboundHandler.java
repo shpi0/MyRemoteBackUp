@@ -7,6 +7,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 import message.FileMessage;
+import message.FilePartMessage;
 import message.MRBMessage;
 import message.MessageType;
 import models.User;
@@ -27,7 +28,6 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
     private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 32;
 
     private FileMessageProcessor fileMessageProcessor = new FileMessageProcessor();
-    private byte[] data = new byte[MAX_FILE_PART_SIZE];
     private FilePart fp;
 
     private UserService userService = new UserService();
@@ -58,6 +58,9 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                 return;
             if (msg instanceof MRBMessage) {
                 switch (((MRBMessage) msg).getMessageType()) {
+                    case FILE_PART_RECEIVED_SUCCESS:
+                        pickAndWriteFilePart(ctx);
+                        break;
                     case CREATE_FOLDER:
                         if (userLoggedIn) {
                             String folderName = (String) (((MRBMessage) msg).getData()).get(0);
@@ -110,16 +113,7 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
-                            fp = filePartsToSend.poll();
-                            while (fp != null) {
-                                fileMessageProcessor.addFileDataToFilePart(fp, MAX_FILE_PART_SIZE, data);
-                                if (fp.getFileData() != null) {
-                                    System.out.println("Sending message part " + fp.getCurrentPartNum() + " of " + fp.getTotalParts() + ", filename: " + fp.getFileName());
-                                    ctx.writeAndFlush(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
-//                                    ctx.writeAndFlush(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(buildCurrentPath() + ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0))));
-                                }
-                                fp = filePartsToSend.poll();
-                            }
+                            pickAndWriteFilePart(ctx);
                         }
                         break;
                     case REGISTER_REQUEST:
@@ -209,6 +203,18 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
         } finally {
             ReferenceCountUtil.release(msg);
         }
+    }
+
+    private void pickAndWriteFilePart(ChannelHandlerContext ctx) {
+        fp = filePartsToSend.poll();
+//        while (fp != null) {
+        if (fp != null) {
+            System.out.println("IH: write to context");
+            ctx.writeAndFlush(new FilePartMessage(fp));
+            System.out.println("IH: write done");
+//            fp = filePartsToSend.poll();
+        }
+        System.out.println("IH: Write complete");
     }
 
     @Override

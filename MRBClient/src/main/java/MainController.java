@@ -131,6 +131,7 @@ public class MainController implements Initializable {
                         if (msg instanceof FileMessage) {
                             try {
                                 fileMessageProcessor.writeIncomingFileMessageToDisk((FileMessage) msg, buildPathToCurrentFolder(), MAX_FILE_PART_SIZE);
+                                Network.sendMsg(new MRBMessage(MessageType.FILE_PART_RECEIVED_SUCCESS));
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
