@@ -98,8 +98,6 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
                                     if (lastPartSize > 0) {
                                         partsCount++;
                                     }
-                                    System.out.println("Parts count: " + partsCount);
-                                    System.out.println("Last part size: " + lastPartSize);
                                     int partSize = MAX_FILE_PART_SIZE;
                                     for (int i = 0; i < partsCount; i++) {
                                         if (lastPartSize > 0 && i == partsCount - 1) {
@@ -207,14 +205,9 @@ public class MRBServerInboundHandler extends ChannelInboundHandlerAdapter {
 
     private void pickAndWriteFilePart(ChannelHandlerContext ctx) {
         fp = filePartsToSend.poll();
-//        while (fp != null) {
         if (fp != null) {
-            System.out.println("IH: write to context");
             ctx.writeAndFlush(new FilePartMessage(fp));
-            System.out.println("IH: write done");
-//            fp = filePartsToSend.poll();
         }
-        System.out.println("IH: Write complete");
     }
 
     @Override

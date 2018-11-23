@@ -27,12 +27,18 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class MainController implements Initializable {
 
     private final static String ROOT_FOLDER = "data";
     private final static String PARENT_FOLDER_LINK = "[..]";
-    private final static int MAX_FILE_PART_SIZE = 1024 * 1024 * 32;
+    private final static int MAX_FILE_PART_SIZE = Network.MAX_FILEPART_SIZE;
+
+    private static final Lock lock = new ReentrantLock();
+    private static final Condition condition = lock.newCondition();
 
     private FileMessageProcessor fileMessageProcessor = new FileMessageProcessor();
 
@@ -44,7 +50,6 @@ public class MainController implements Initializable {
     private Map<String, FileType> localFilesMap = new HashMap<>();
     private Map<String, FileType> serverFilesMap = new HashMap<>();
     private LinkedList<String> folders = new LinkedList<>();
-    //    private ArrayDeque<FilePart> filePartsToSend = new ArrayDeque<>();
     private BlockingDeque<FilePart> filePartsToSend = new LinkedBlockingDeque<>();
     private String serverPath;
 
@@ -55,12 +60,7 @@ public class MainController implements Initializable {
             byte[] data = new byte[MAX_FILE_PART_SIZE];
             while (true) {
                 if (!loggedIn) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    continue;
+                    break;
                 }
                 fp = filePartsToSend.poll();
                 if (fp != null) {
@@ -70,12 +70,13 @@ public class MainController implements Initializable {
                         e.printStackTrace();
                     }
                     if (fp.getFileData() != null) {
-                        System.out.println("Sending message part " + fp.getCurrentPartNum() + " of " + fp.getTotalParts() + ", filename: " + fp.getFileName());
                         Network.sendMsg(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
                     }
                 } else {
                     try {
-                        Thread.sleep(1000);
+                        lock.lock();
+                        condition.await();
+                        lock.unlock();
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
@@ -149,6 +150,9 @@ public class MainController implements Initializable {
                                     loginBtn.setDisable(true);
                                     registerBtn.setDisable(true);
                                     refreshBtn.setDisable(false);
+                                    Thread consumerThread = new Thread(new Consumer());
+                                    consumerThread.setDaemon(true);
+                                    consumerThread.start();
                                     break;
                                 case REGISTER_DONE:
                                     showAlert("Registration done! You may login now.");
@@ -191,10 +195,6 @@ public class MainController implements Initializable {
         });
         t.setDaemon(true);
         t.start();
-        Consumer consumer = new Consumer();
-        Thread consumerThread = new Thread(consumer);
-        consumerThread.setDaemon(true);
-        consumerThread.start();
         initializeLocalListView();
         initializeServerListView();
         loginBtn.setDisable(false);
@@ -325,19 +325,19 @@ public class MainController implements Initializable {
                     if (lastPartSize > 0) {
                         partsCount++;
                     }
-                    System.out.println("Parts count: " + partsCount);
-                    System.out.println("Last part size: " + lastPartSize);
                     int partSize = MAX_FILE_PART_SIZE;
                     for (int i = 0; i < partsCount; i++) {
                         if (lastPartSize > 0 && i == partsCount - 1) {
                             partSize = lastPartSize;
                         }
-                        System.out.println("Adding to send queue file part " + i + 1);
                         filePartsToSend.offer(new FilePart(i * MAX_FILE_PART_SIZE, null, selectedFile, serverPath, buildPathToCurrentFolder(), partSize, partsCount, i + 1));
                     }
                 } else {
                     filePartsToSend.offer(new FilePart(Paths.get(buildPathToCurrentFolder() + selectedFile), serverPath));
                 }
+                lock.tryLock();
+                condition.signal();
+                lock.unlock();
             } catch (IOException e) {
                 e.printStackTrace();
             }

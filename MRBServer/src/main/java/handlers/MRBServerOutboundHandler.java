@@ -27,15 +27,11 @@ public class MRBServerOutboundHandler extends ChannelOutboundHandlerAdapter {
             if (fp.getFileData() != null) {
                 System.out.println("Sending message part " + fp.getCurrentPartNum() + " of " + fp.getTotalParts() + ", filename: " + fp.getFileName());
                 msg = new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum());
-//                ctx.writeAndFlush(new FileMessage(fp.getFileName(), fp.getFilePath(), fp.getFileData(), fp.getTotalParts(), fp.getCurrentPartNum()));
-//                ctx.writeAndFlush(FileMessageProcessor.getInstance().generateFileMessage(Paths.get(buildCurrentPath() + ((ArrayList<String>) (((MRBMessage) msg).getData())).get(0))));
             } else {
                 System.out.println("WARNING! File with null data detected.");
             }
         }
         ctx.writeAndFlush(msg);
-/*        super.write(ctx, msg, promise);
-        super.flush(ctx);*/
         System.out.println("===============================");
     }
 

@@ -6,6 +6,9 @@ import java.io.IOException;
 import java.net.Socket;
 
 public class Network {
+
+    public static final int MAX_FILEPART_SIZE = 1024 * 1024 * 32;
+
     private static Socket socket;
     private static ObjectEncoderOutputStream out;
     private static ObjectDecoderInputStream in;
