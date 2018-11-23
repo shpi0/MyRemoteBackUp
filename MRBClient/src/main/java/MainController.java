@@ -263,7 +263,48 @@ public class MainController implements Initializable {
     }
 
     private void refreshLocalFileList() {
+        StringBuilder sb = new StringBuilder();
         runFX(() -> {
+            localFilesMap.clear();
+            localListView.getItems().clear();
+            if (!buildPathToCurrentFolder().equals(ROOT_FOLDER + "/")) {
+                localFilesMap.put(PARENT_FOLDER_LINK, FileType.FOLDER);
+                localListView.getItems().add(PARENT_FOLDER_LINK);
+            }
+            try {
+                Files.list(Paths.get(buildPathToCurrentFolder()))
+                        .sorted((o1, o2) -> {
+                            if (o1.equals(o2)) {
+                                return 0;
+                            }
+                            if (Files.isDirectory(o1) && !Files.isDirectory(o2)) {
+                                return -1;
+                            }
+                            if (!Files.isDirectory(o1) && Files.isDirectory(o2)) {
+                                return 1;
+                            }
+                            return o1.compareTo(o2);
+                        })
+                        .forEach(o -> {
+                            sb.setLength(0);
+                            FileType fileType;
+                            if (!Files.isDirectory(o)) {
+                                fileType = FileType.FILE;
+                                sb.append(o.getFileName().toString());
+
+                            } else {
+                                fileType = FileType.FOLDER;
+                                sb.append("[").append(o.getFileName().toString()).append("]");
+                            }
+                            localFilesMap.put(sb.toString(), fileType);
+                            localListView.getItems().add(sb.toString());
+                        });
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        // Old method revision
+/*        runFX(() -> {
             try {
                 localFilesMap.clear();
                 localListView.getItems().clear();
@@ -289,7 +330,7 @@ public class MainController implements Initializable {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        });
+        });*/
     }
 
     private void refreshServerFileList(Map<String, FileType> fileMap, List<String> fileList) {
